@@ -236,7 +236,7 @@ def main(xml_dump_path):
 if __name__ == "__main__":
     # ensure the script is called with the XML file path
     if len(sys.argv) < 2:
-        print("Usage: python extract_knowledge_graph.py /path/to/wikiproof_dump.xml")
+        print("Usage: python extractProofsXML.py /path/to/wikiproof_dump.xml")
         sys.exit(1)
 
     xml_dump_path = sys.argv[1]
