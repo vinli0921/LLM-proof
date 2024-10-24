@@ -108,11 +108,23 @@ def create_relationships_batch(tx, relationships):
     MATCH (to:Node {id: rel.to_id})
     MERGE (from)-[:LINK]->(to)
     """, relationships=relationships)
+    
+def append_embeddings(session, filepath):
+    
+    session.run("""
+    LOAD CSV WITH HEADERS
+    FROM $filepath
+    AS row
+    MATCH (m:Node {id: row.id})
+    CALL db.create.setNodeVectorProperty(m, 'plotEmbedding', apoc.convert.fromJsonList(row.embedding))
+    RETURN count(*)
+    """, filepath=filepath)
 
 def main():
     with gds.session() as session:
         create_constraints(session)
         load_nodes(session, 'nodes.csv') 
+        append_embeddings(session, 'embeddings.csv')
         load_relationships(session, 'relationships.csv') 
 
 if __name__ == "__main__":
