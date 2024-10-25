@@ -42,19 +42,19 @@ def is_relevant_page(title, namespace):
     Determines if a page is an Axiom or Definition based on title patterns and namespace.
     """
     # focus on the Axiom namespace (ns=100) and Definition namespace (ns=102) 
-    if namespace not in ['100', '102']:
+    if namespace not in ['0','100', '102']:
         return None
 
     # define patterns for titles
     title_patterns = {
         'def': re.compile(r'^(Definition)\s*:', re.IGNORECASE),
         'axiom': re.compile(r'^(Axiom)\s*:', re.IGNORECASE),
-
     }
 
     for key, pattern in title_patterns.items():
         if pattern.match(title):
             return key
+        return 'proof'
 
     return None
 
@@ -94,6 +94,10 @@ def collect_nodes(xml_file_path):
         # extract title
         title_elem = page.find('mw:title', namespaces=NS)
         title = title_elem.text if title_elem is not None else ''
+        
+        # Add this condition to skip pages with '/Also known as' in the title
+        if '/Also known as' in title or '/Mistake' in title:
+            continue
 
         # extract namespace
         ns_elem = page.find('mw:ns', namespaces=NS)
