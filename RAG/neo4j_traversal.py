@@ -20,11 +20,11 @@ chat_llm = ChatOpenAI(openai_api_key=api_key, model_name='gpt-4o-mini', temperat
 starting_node_prompt = ChatPromptTemplate.from_messages([
     (
         "system",
-        "You are an expert in mathematical concepts represented in a knowledge graph. The nodes in the knowledge graph are titled using the format 'Definition:<Concept>' or 'Axiom:<Concept>'."
+        "You are an expert in mathematical concepts represented in a knowledge graph. The node names are the names of the mathematical concepts, such as Odd Integer or Prime Number."
     ),
     (
         "human",
-        'Given the following user query:\n\n"{query}"\n\nIdentify the most relevant node title in the knowledge graph that should be used as a starting point for information retrieval.\n\nProvide only the node title, exactly as it appears in the knowledge graph.'
+        'Given the following user query:\n\n"{query}"\n\nIdentify the most relevant node title in the knowledge graph that should be used as a starting point for information retrieval.\n\nProvide only the node name, exactly as it appears in the knowledge graph.'
     )
 ])
 
@@ -32,8 +32,8 @@ starting_node_chain = starting_node_prompt | chat_llm | StrOutputParser()
 
 def find_closest_node_title(driver, node_title):
     with driver.session() as session:
-        result = session.run("MATCH (n) RETURN n.title AS title")
-        titles = [record["title"] for record in result]
+        result = session.run("MATCH (n) RETURN n.name AS name")
+        titles = [record["name"] for record in result]
     
     closest_matches = difflib.get_close_matches(node_title, titles, n=1, cutoff=0.5)
     if closest_matches:
@@ -46,7 +46,7 @@ def node_exists(driver, title):
         result = session.run("MATCH (n {title: $title}) RETURN n LIMIT 1", title=title)
         return result.single() is not None
 
-def get_starting_node_title(query):
+def get_starting_node_name(query):
     response = starting_node_chain.invoke({"query": query})
     node_title = response.strip()
     print(f"LLM suggested starting node: {node_title}")
@@ -66,22 +66,22 @@ def get_starting_node_title(query):
 
 
 # BFS
-def bfs_traversal(driver, start_title, max_depth=2, max_nodes=50):
+def bfs_traversal(driver, start_name, max_depth=2, max_nodes=50):
     visited = set()
-    queue = [(start_title, 0)]
+    queue = [(start_name, 0)]
     nodes_content = []
     
     while queue and len(visited) < max_nodes:
-        current_title, depth = queue.pop(0)
+        current_name, depth = queue.pop(0)
         if depth > max_depth:
             continue
-        if current_title in visited:
+        if current_name in visited:
             continue
-        visited.add(current_title)
+        visited.add(current_name)
         
         # get node content and connected nodes
         with driver.session() as session:
-            result = session.execute_read(get_node_and_neighbors, current_title)
+            result = session.execute_read(get_node_and_neighbors, current_name)
         
         if not result:
             continue
@@ -96,13 +96,13 @@ def bfs_traversal(driver, start_title, max_depth=2, max_nodes=50):
     
     return nodes_content
 
-def get_node_and_neighbors(tx, title):
+def get_node_and_neighbors(tx, name):
     query = """
-    MATCH (n:Node {title: $title})
+    MATCH (n:Node {name: $name})
     OPTIONAL MATCH (n)-[:LINK]->(m:Node)
-    RETURN n.content AS content, collect(CASE WHEN m IS NOT NULL THEN m.title END) AS neighbors
+    RETURN n.content AS content, collect(CASE WHEN m IS NOT NULL THEN m.name END) AS neighbors
     """
-    result = tx.run(query, title=title)
+    result = tx.run(query, name=name)
     record = result.single()
     if record:
         return {
@@ -148,15 +148,15 @@ def generate_answer(context, question):
 # main
 def answer_user_query(query, driver, max_depth=2, max_nodes=50):
     # 1: LLM determines starting node
-    start_title = get_starting_node_title(query)
-    if not start_title:
+    start_name = get_starting_node_name(query)
+    if not start_name:
         return "I'm sorry, I couldn't determine a starting point for your query."
     
     # 2: perform BFS
-    nodes_content = bfs_traversal(driver, start_title, max_depth=max_depth, max_nodes=max_nodes)
+    nodes_content = bfs_traversal(driver, start_name, max_depth=max_depth, max_nodes=max_nodes)
     
     if not nodes_content:
-        return f"I'm sorry, I couldn't find information on '{start_title}' to answer your question."
+        return f"I'm sorry, I couldn't find information on '{start_name}' to answer your question."
     
     # 3: compile context
     context = compile_context(nodes_content)
@@ -166,7 +166,7 @@ def answer_user_query(query, driver, max_depth=2, max_nodes=50):
     return answer
 
 
-user_query = "Formally prove that Suppose that a, b, and n are whole numbers. If n does not divide a times b, then n does not divide a and b."
+user_query = "Prove this statement: Suppose that a, b, and n are whole numbers. If n does not divide a times b, then n does not divide a and b."
 
 answer = answer_user_query(user_query, driver, max_depth=3, max_nodes=50)
 
