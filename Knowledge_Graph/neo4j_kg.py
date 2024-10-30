@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
 import pandas as pd
+import json
 
 load_dotenv()
 
@@ -110,22 +111,49 @@ def create_relationships_batch(tx, relationships):
     """, relationships=relationships)
     
 def append_embeddings(session, filepath):
-    
-    session.run("""
-    LOAD CSV WITH HEADERS
-    FROM $filepath
-    AS row
-    MATCH (m:Node {id: row.id})
-    CALL db.create.setNodeVectorProperty(m, 'plotEmbedding', apoc.convert.fromJsonList(row.embedding))
-    RETURN count(*)
-    """, filepath=filepath)
+    """
+    Reads embeddings from a CSV file and updates the 'plotEmbedding' property of nodes in the database.
+
+    Args:
+        session (Session): Neo4j Session object from the Neo4j driver.
+        filepath (str): The file path to the CSV file containing embeddings.
+                        The CSV file should have columns: 'id', 'embedding'.
+    """
+    df_embeddings = pd.read_csv(filepath)
+    df_embeddings['id'] = df_embeddings['id'].astype(int)
+
+    # Convert 'embedding' from JSON string to list
+    df_embeddings['embedding'] = df_embeddings['embedding'].apply(json.loads)
+
+    # Batch size
+    batch_size = 1000
+    total_rows = len(df_embeddings)
+    for i in range(0, total_rows, batch_size):
+        batch = df_embeddings.iloc[i:i+batch_size]
+        embeddings = batch.to_dict('records')
+        session.execute_write(update_embeddings_batch, embeddings)
+        print(f"Processed {min(i+batch_size, total_rows)} out of {total_rows} embeddings")
+        
+def update_embeddings_batch(tx, embeddings):
+    """
+    Updates the 'plotEmbedding' property of nodes in the database for a batch of embeddings.
+
+    Args:
+        tx (Transaction): The transaction object provided by the Neo4j driver.
+        embeddings (list): A list of dictionaries with 'id' and 'embedding' keys.
+    """
+    tx.run("""
+    UNWIND $embeddings AS embedding
+    MATCH (n:Node {id: embedding.id})
+    SET n.plotEmbedding = embedding.embedding
+    """, embeddings=embeddings)
 
 def main():
     with gds.session() as session:
-        create_constraints(session)
-        load_nodes(session, 'nodes.csv') 
+        # create_constraints(session)
+        # load_nodes(session, 'nodes.csv') 
         append_embeddings(session, 'embeddings.csv')
-        load_relationships(session, 'relationships.csv') 
+        # load_relationships(session, 'relationships.csv') 
 
 if __name__ == "__main__":
     try:
