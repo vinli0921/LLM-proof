@@ -2,7 +2,7 @@
 Repo for Algoverse Research
 
 # 1. Getting Started
-
+https://github.com/vinli0921/LLM-proof/blob/main/README.md
 ## 1.1 Create a virtual environment 
 - Create a virtual enviornment in the root directory of the repository.
 - You may replace "myenv" with a name of your choice
@@ -33,7 +33,7 @@ pip install -r requirements.txt
 2. Copy + Paste the content from the file named **.env.example** into the newly created **.env** file
 3. Set the variables to the necessary values
 
-# 2. Extracting Proofs to Your Own Neo4j AuraDB
+# 2. Extracting Proofs to Your Own Neo4j AuraDB (OPTIONAL)
 
 ## 2.1 Retrieving the XML Dump
 1. Press this link: https://proofwiki.org/xmldump/latest.xml.gz which will download a zip file
