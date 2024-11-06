@@ -14,3 +14,9 @@
 # venv files
 *venv/
 *venv_*
+
+# python cache files
+__pycache__/
+
+# python version
+.python-version
