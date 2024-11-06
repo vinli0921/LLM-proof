@@ -13,3 +13,4 @@
 
 # venv files
 *venv/
+*venv_*
