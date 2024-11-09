@@ -3,14 +3,22 @@ Repo for Algoverse Research
 
 # 1. Getting Started
 https://github.com/vinli0921/LLM-proof/blob/main/README.md
-## 1.1 Create a virtual environment 
+## 1.1 Setting up the repository
+- Run these commands
+```
+git clone --recurse-submodules https://github.com/vinli0921/LLM-proof.git
+cd mathlib
+lake build
+```
+
+## 1.2 Create a virtual environment 
 - Create a virtual enviornment in the root directory of the repository.
 - You may replace "myenv" with a name of your choice
 ```
 python -m venv myenv
 ```
 
-## 1.2 Activate the virtual environment
+## 1.3 Activate the virtual environment
 
 ### On macOS and Linux
 ```
@@ -22,13 +30,13 @@ source myenv/bin/activate
 myenv\Scripts\activate
 ```
 
-## 1.3 Install Dependencies
+## 1.4 Install Dependencies
 To install all packages and code dependencies please run:
 ```
 pip install -r requirements.txt
 ```
 
-## 1.4 Set Enviornment Variables
+## 1.5 Set Enviornment Variables
 1. In the root directory of the repository, make a new file named **.env**
 2. Copy + Paste the content from the file named **.env.example** into the newly created **.env** file
 3. Set the variables to the necessary values
@@ -50,5 +58,21 @@ python Graph_Creation/extractProofsXML.py latest.xml
 run the file **neo4j_kg.py**
 - this should successfully upload around 20k nodes and 80k relationships (give or take)
 
-# 3. Using the Knowledge Graph to Perform Retrieval Augmented Generation
-COMING SOON
+# 3. Running Tests
+## 3.1 Configuring the LLMS
+- Go to retrieval.py
+- You can change the LLM model by changing the model name string in the constructor of the BaseProver class
+
+## 3.2 Configuring the datasets
+- Go to retrieval.py
+- You can change the datasets by changing the dataset name string in the load_test_data function located in the main method
+- Recommended: rename the output file name with <llm-model>_<dataset-name>.json
+
+## 3.3 Running the file
+```
+python retrieval.py
+```
+or
+```
+python3 retrieval.py
+```
