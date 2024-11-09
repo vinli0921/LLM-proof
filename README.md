@@ -66,7 +66,7 @@ run the file **neo4j_kg.py**
 ## 3.2 Configuring the datasets
 - Go to retrieval.py
 - You can change the datasets by changing the dataset name string in the load_test_data function located in the main method
-- Recommended: rename the output file name with <llm-model>_<dataset-name>.json
+- Recommended: rename the output file name with llm-model_dataset-name.json
 
 ## 3.3 Running the file
 ```
