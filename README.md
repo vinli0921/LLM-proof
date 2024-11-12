@@ -4,6 +4,7 @@ Repo for Algoverse Research
 # 1. Getting Started
 https://github.com/vinli0921/LLM-proof/blob/main/README.md
 ## 1.1 Setting up the repository
+- First download [elan](https://github.com/leanprover/elan)
 - Run these commands
 ```
 git clone --recurse-submodules https://github.com/vinli0921/LLM-proof.git
