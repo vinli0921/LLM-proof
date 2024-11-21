@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from neo4j import GraphDatabase
 import pandas as pd
 import json
+import re
 
 load_dotenv()
 
@@ -110,29 +111,45 @@ def create_relationships_batch(tx, relationships):
     MERGE (from)-[:LINK]->(to)
     """, relationships=relationships)
     
-def append_embeddings(session, filepath):
+def append_embeddings(session, filepath, batch_size=100):
     """
     Reads embeddings from a CSV file and updates the 'plotEmbedding' property of nodes in the database.
+    Uses chunked reading to manage memory usage.
 
     Args:
         session (Session): Neo4j Session object from the Neo4j driver.
         filepath (str): The file path to the CSV file containing embeddings.
-                        The CSV file should have columns: 'id', 'embedding'.
+        batch_size (int): Number of rows to process at once. Defaults to 100.
     """
-    df_embeddings = pd.read_csv(filepath)
-    df_embeddings['id'] = df_embeddings['id'].astype(int)
-
-    # Convert 'embedding' from JSON string to list
-    df_embeddings['embedding'] = df_embeddings['embedding'].apply(json.loads)
-
-    # Batch size
-    batch_size = 1000
-    total_rows = len(df_embeddings)
-    for i in range(0, total_rows, batch_size):
-        batch = df_embeddings.iloc[i:i+batch_size]
-        embeddings = batch.to_dict('records')
-        session.execute_write(update_embeddings_batch, embeddings)
-        print(f"Processed {min(i+batch_size, total_rows)} out of {total_rows} embeddings")
+    # Get total number of rows first
+    total_rows = sum(1 for _ in open(filepath)) - 1  # subtract 1 for header
+    print(f"Total embeddings to process: {total_rows}")
+    
+    # Process the CSV in chunks
+    for chunk_number, chunk in enumerate(pd.read_csv(filepath, chunksize=batch_size)):
+        # Convert IDs to integers
+        chunk['id'] = chunk['id'].astype(int)
+        
+        # Process embeddings one at a time in this chunk
+        embeddings = []
+        for _, row in chunk.iterrows():
+            try:
+                embedding_vector = json.loads(row['embedding'])
+                embeddings.append({
+                    'id': row['id'],
+                    'embedding': embedding_vector
+                })
+            except json.JSONDecodeError as e:
+                print(f"Error processing embedding for ID {row['id']}: {e}")
+                continue
+        
+        # Update database with this batch
+        if embeddings:
+            session.execute_write(update_embeddings_batch, embeddings)
+        
+        # Calculate progress
+        processed = min((chunk_number + 1) * batch_size, total_rows)
+        print(f"Processed {processed} out of {total_rows} embeddings")
         
 def update_embeddings_batch(tx, embeddings):
     """
@@ -147,6 +164,87 @@ def update_embeddings_batch(tx, embeddings):
     MATCH (n:Node {id: embedding.id})
     SET n.plotEmbedding = embedding.embedding
     """, embeddings=embeddings)
+    
+def clean_content(content: str) -> str:
+    """Clean retrieved content by removing unwanted sections and formatting while preserving proofs."""
+    # Define filter patterns - removed patterns that would remove proofs and equations
+    filter_patterns = [
+        r'\[\[Category:.?\]\]',  # Category links
+        r'== Also see ==.?(?=\n\n|\Z)',  # Also see sections
+        r'== Historical Note ==.?(?=\n\n|\Z)',  # Historical notes
+        r'== Notation ==.?(?=\n\n|\Z)',  # Notation sections
+        r'== Examples ==.?(?=\n\n|\Z)',  # Examples sections
+        r'\* \[\[.?\]\].?\n',  # Bullet points with wiki links
+        r'{{Link-to-category\|.?}}',  # Link to category templates
+        r'{{:.*?}}',  # Template inclusions (but not equation templates)
+    ]
+
+    # Extract content between <onlyinclude> tags while keeping the content inside
+    content = re.sub(r'<onlyinclude>(.*?)</onlyinclude>', r'\1', content, flags=re.DOTALL)
+
+    # Apply all filter patterns
+    for pattern in filter_patterns:
+        content = re.sub(pattern, '', content, flags=re.DOTALL)
+
+    # Remove multiple newlines and clean up spacing
+    content = re.sub(r'\n{3,}', '\n\n', content)
+    content = re.sub(r'^\s+|\s+$', '', content)
+
+    # Remove wiki formatting but preserve section headers for proofs
+    content = re.sub(r'\[\[(?:[^|\]]*\|)?([^\]]+)\]\]', r'\1', content)
+
+    return content
+    
+def update_node_content(session, batch_size=1000):
+    """
+    Updates all node content in the Neo4j database using the content cleaning function.
+    Processes nodes in batches to manage memory and performance.
+
+    Args:
+        session (Session): Neo4j Session object from the Neo4j driver.
+        batch_size (int): Number of nodes to process in each batch. Defaults to 1000.
+    """
+    def get_total_nodes(tx):
+        result = tx.run("MATCH (n:Node) RETURN count(n) as count")
+        return result.single()["count"]
+    
+    def get_batch_nodes(tx, skip, limit):
+        result = tx.run("""
+            MATCH (n:Node)
+            RETURN n.id as id, n.content as content
+            SKIP $skip
+            LIMIT $limit
+        """, skip=skip, limit=limit)
+        return [{"id": record["id"], "content": record["content"]} for record in result]
+    
+    def update_nodes_batch(tx, nodes):
+        tx.run("""
+        UNWIND $nodes as node
+        MATCH (n:Node {id: node.id})
+        SET n.content = node.cleaned_content
+        """, nodes=nodes)
+
+    # Get total number of nodes
+    total_nodes = session.execute_read(get_total_nodes)
+    print(f"Total nodes to process: {total_nodes}")
+
+    # Process nodes in batches
+    for skip in range(0, total_nodes, batch_size):
+        # Get batch of nodes
+        nodes = session.execute_read(get_batch_nodes, skip, batch_size)
+        
+        # Clean content for each node
+        for node in nodes:
+            if node["content"]:  # Check if content exists
+                node["cleaned_content"] = clean_content(node["content"])
+            else:
+                node["cleaned_content"] = ""  # Handle null content
+        
+        # Update nodes with cleaned content
+        session.execute_write(update_nodes_batch, nodes)
+        
+        processed = min(skip + batch_size, total_nodes)
+        print(f"Processed {processed} out of {total_nodes} nodes")
 
 def main():
     with gds.session() as session:
@@ -154,6 +252,7 @@ def main():
         # load_nodes(session, 'nodes.csv') 
         append_embeddings(session, 'embeddings.csv')
         # load_relationships(session, 'relationships.csv') 
+        # update_node_content(session)
 
 if __name__ == "__main__":
     try:
