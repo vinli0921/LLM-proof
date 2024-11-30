@@ -49,38 +49,39 @@ class ProofGenerator:
             self.model_name = model_type
             self.temperature = temperature
             self.use_anthropic = True
-    
+            
     def generate_proof(self, context: str, problem: str) -> str:
-        prompt = f"""Given the following mathematical problem and context, generate a clear and detailed informal proof in natural language.
-        Do not attempt to formalize the proof - focus only on explaining the mathematical reasoning clearly.
+        prompt_template = ChatPromptTemplate.from_messages([
+            ("system", "You are a mathematics expert focused on generating clear informal proofs."),
+            ("user", """Given the following mathematical problem and context, generate a clear and detailed informal proof in natural language.
+Do not attempt to formalize the proof - focus only on explaining the mathematical reasoning clearly.
 
-        Context:
-        {context}
+Context:
+{context}
 
-        Problem:
-        {problem}
+Problem:
+{problem}
 
-        Provide your proof in the following format:
+Provide your proof in the following format:
 
-        # Informal Proof:
-        [Your natural language proof here]
-        """
-        
+# Informal Proof:
+[Your natural language proof here]
+""")
+        ])
         if self.use_anthropic:
             response = self.client.messages.create(
                 model=self.model_name,
                 temperature=self.temperature,
                 max_tokens=4096,
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": prompt_template}]
             )
             return response.content[0].text.strip()
         else:
-            prompt_template = ChatPromptTemplate.from_messages([
-                ("system", "You are a mathematics expert focused on generating clear informal proofs."),
-                ("user", prompt)
-            ])
             chain = prompt_template | self.llm | StrOutputParser()
-            return chain
+            return chain.invoke({
+                "context": context,
+                "problem": problem
+            }).strip()
 
 class AutoFormalizer:
     """Responsible for converting informal proofs to Lean 4 formal proofs"""
@@ -94,7 +95,9 @@ class AutoFormalizer:
         )
     
     def formalize_proof(self, header: str, informal_proof: str, goal: str) -> str:
-        prompt = f"""Convert the following informal mathematical proof into a formal Lean 4 proof.
+        prompt_template = ChatPromptTemplate.from_messages([
+            ("system", "You are an expert in formalizing mathematical proofs in Lean 4."),
+            ("user", """Convert the following informal mathematical proof into a formal Lean 4 proof.
         
         Lean 4 Header:
         {header}
@@ -106,14 +109,14 @@ class AutoFormalizer:
         {goal}
 
         Provide the formalized proof in Lean 4 syntax.
-        """
-        
-        prompt_template = ChatPromptTemplate.from_messages([
-            ("system", "You are an expert in formalizing mathematical proofs in Lean 4."),
-            ("user", prompt)
+        """)
         ])
         chain = prompt_template | self.llm | StrOutputParser()
-        return chain.invoke({}).strip()
+        return chain.invoke({
+            "header": header,
+            "informal_proof": informal_proof,
+            "goal": goal
+        }).strip()
 
 class TwoAgentProver:
     def __init__(
@@ -332,7 +335,7 @@ if __name__ == "__main__":
         name='verifier'
     )
     
-    proof_generator = ProofGenerator(model_type="gpt-4")
+    proof_generator = ProofGenerator(model_type="gpt-4o-mini")
     auto_formalizer = AutoFormalizer()
     
     try:
