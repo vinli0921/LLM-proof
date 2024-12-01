@@ -13,6 +13,8 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.schema import StrOutputParser
 from anthropic import Anthropic
+from transformers import AutoTokenizer
+from vllm import LLM, SamplingParams
 
 from RAG.Neo4jVectorRetriever import Neo4jVectorRetriever
 from prover.lean.verifier import Lean4ServerScheduler
@@ -85,38 +87,45 @@ Provide your proof in the following format:
 
 class AutoFormalizer:
     """Responsible for converting informal proofs to Lean 4 formal proofs"""
-    def __init__(self, model_type="deepseek-math-7b", temperature=0):
-        # Note: This is a placeholder - replace with actual DeepSeek integration
-        # For now, using GPT-4 to simulate the autoformalization
-        self.llm = ChatOpenAI(
-            model_name="gpt-4",  # Replace with DeepSeek
-            temperature=temperature,
-            openai_api_key=os.environ.get('OPENAI_API_KEY')
-        )
+    def __init__(self, model_name="deepseek-ai/DeepSeek-Prover-V1.5-RL", temperature=0.0):
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        self.model = LLM(model=model_name, max_num_batched_tokens=8192, seed=1, trust_remote_code=True)
+        self.temperature = temperature
     
-    def formalize_proof(self, header: str, informal_proof: str, goal: str) -> str:
-        prompt_template = ChatPromptTemplate.from_messages([
-            ("system", "You are an expert in formalizing mathematical proofs in Lean 4."),
-            ("user", """Convert the following informal mathematical proof into a formal Lean 4 proof.
-        
-        Lean 4 Header:
-        {header}
+    def formalize_proof(self, header: str, informal_proof: str, informal_prefix: str, formal_statement: str, goal: str) -> str:
+        # Construct the prompt
+        #prompt = "Convert the following informal mathematical proof into a formal Lean 4 proof."
+        prompt = f"Complete the following Lean 4 code, utilizing the the following informal proof as guidance:\n{informal_proof}\n\n"
+        # Combine the header, informal proof, and goal
+        code_prefix = f"```lean4\n{header}{informal_prefix}{formal_statement}\n```\n\n\n"
 
-        Informal Proof:
-        {informal_proof}
+        # Set up sampling parameters
+        sampling_params = SamplingParams(
+            temperature=self.temperature,
+            max_tokens=2048,
+            top_p=0.1,
+            n=1,
+        )
 
-        Goal to Prove:
-        {goal}
+        # Prepare the input for the model
+        model_input = prompt + code_prefix
 
-        Provide the formalized proof in Lean 4 syntax.
-        """)
-        ])
-        chain = prompt_template | self.llm | StrOutputParser()
-        return chain.invoke({
-            "header": header,
-            "informal_proof": informal_proof,
-            "goal": goal
-        }).strip()
+        # Generate the formal proof using the DeepSeek model
+        model_outputs = self.model.generate(
+            [model_input],
+            sampling_params,
+            use_tqdm=False,
+        )
+
+        # Extract the generated text
+        generated_text = model_outputs[0].outputs[0].text
+
+        # Combine the code prefix and the generated text to form the complete formal proof
+        formal_proof = code_prefix + "\ngenerated text\n" + generated_text
+        print(formal_proof)
+
+        # Return the formal proof
+        return formal_proof.strip()
 
 class TwoAgentProver:
     def __init__(
@@ -157,9 +166,10 @@ class TwoAgentProver:
             self.driver.close()
 
     def _verify_lean_proof(self, formal_proof: str) -> Tuple[bool, Optional[Dict]]:
-        request_id_list = self.lean4_scheduler.submit_all_request([formal_proof])
+        request_id_list = self.lean4_scheduler.submit_all_request([re.search(r'```lean4\n(.*?)\n```',formal_proof, re.DOTALL).group(1)])
         outputs_list = self.lean4_scheduler.get_all_request_outputs(request_id_list)
         result = outputs_list[0]
+        print(result)
         return (result['pass'] == True and result['complete'] == True), result
 
     def _log_attempt(self, prompt: str, depth: int, attempt: int, 
@@ -238,6 +248,8 @@ class TwoAgentProver:
                     formal_proof = self.auto_formalizer.formalize_proof(
                         test_case.header,
                         informal_proof,
+                        test_case.informal_prefix,
+                        test_case.formal_statement,
                         test_case.goal
                     )
                     
@@ -329,13 +341,13 @@ if __name__ == "__main__":
     
     # Initialize components
     lean4_scheduler = Lean4ServerScheduler(
-        max_concurrent_requests=1,
+        max_concurrent_requests=3,
         timeout=300,
         memory_limit=10,
         name='verifier'
     )
     
-    proof_generator = ProofGenerator(model_type="gpt-4o-mini")
+    proof_generator = ProofGenerator(model_type="gpt-4o")
     auto_formalizer = AutoFormalizer()
     
     try:

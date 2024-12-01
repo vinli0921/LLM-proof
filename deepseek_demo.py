@@ -32,9 +32,9 @@ theorem amc12b_2003_p6 (a r : ℝ) (u : ℕ → ℝ) (h₀ : ∀ k, u k = a * r 
 '''
 
 sampling_params = SamplingParams(
-    temperature=1.0,
+    temperature=0.0,
     max_tokens=2048,
-    top_p=0.95,
+    top_p=0.1,
     n=1,
 )
 model_inputs = [prompt + code_prefix]
@@ -61,7 +61,13 @@ print(result)
 ```
 '''
 
+test = """```lean4
+import Mathlib\nimport Aesop\n\nset_option maxHeartbeats 0\n\nopen BigOperators Real Nat Topology Rat\n\n/-- The second and fourth terms of a geometric sequence are $2$ and $6$. Which of the following is a possible first term?\nShow that it is $\x0crac{2\\sqrt{3}}{3}$.-/\ntheorem amc12b_2003_p6 (a r : ℝ) (u : ℕ → ℝ) (h₀ : ∀ k, u k = a * r ^ k) (h₁ : u 1 = 2)\n  (h₂ : u 3 = 6) : u 0 = 2 / Real.sqrt 3 ∨ u 0 = -(2 / Real.sqrt 3) := by\n  simp_all only [Nat.one_eq_succ_zero, Nat.zero_eq, zero_add, Nat.add_succ, Nat.add_zero,\n    Nat.succ_add]\n  have h₁' : a * r = 2 := by simpa [h₀] using h₁\n  have h₂' : a * r ^ 3 = 6 := by simpa [h₀] using h₂\n  have h₃ : r ^ 2 = 3 := by\n    nlinarith\n  have h₄ : a = 2 / Real.sqrt 3 ∨ a = -(2 / Real.sqrt 3) := by\n    apply eq_or_eq_neg_of_sq_eq_sq <;>\n    field_simp <;>\n    nlinarith\n  simpa [h₀] using h₄
+```
+"""
+
 request_id_list = lean4_scheduler.submit_all_request([re.search(r'```lean4\n(.*?)\n```', result, re.DOTALL).group(1)])
+#request_id_list = lean4_scheduler.submit_all_request([re.search(r'```lean4\n(.*?)\n```', test, re.DOTALL).group(1)])
 outputs_list = lean4_scheduler.get_all_request_outputs(request_id_list)
 print(outputs_list[0])
 
