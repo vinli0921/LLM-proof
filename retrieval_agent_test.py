@@ -97,7 +97,7 @@ class AutoFormalizer:
         #prompt = "Convert the following informal mathematical proof into a formal Lean 4 proof."
         prompt = f"Complete the following Lean 4 code, utilizing the the following informal proof as guidance:\n{informal_proof}\n\n"
         # Combine the header, informal proof, and goal
-        code_prefix = f"```lean4\n{header}{informal_prefix}{formal_statement}\n```\n\n\n"
+        code_prefix = f"You must generate the lean code in this format:\n```lean4\n{header}{informal_prefix}{formal_statement}\n```\n\n\n"
 
         # Set up sampling parameters
         sampling_params = SamplingParams(
@@ -125,7 +125,7 @@ class AutoFormalizer:
         print(formal_proof)
 
         # Return the formal proof
-        return formal_proof.strip()
+        return generated_text.strip()
 
 class TwoAgentProver:
     def __init__(

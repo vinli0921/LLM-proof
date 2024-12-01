@@ -7,9 +7,9 @@ from vllm import LLM, SamplingParams
 from prover.lean.verifier import Lean4ServerScheduler
 
 
-model_name = "deepseek-ai/DeepSeek-Prover-V1.5-RL"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = LLM(model=model_name, max_num_batched_tokens=8192, seed=1, trust_remote_code=True)
+# model_name = "deepseek-ai/DeepSeek-Prover-V1.5-RL"
+# tokenizer = AutoTokenizer.from_pretrained(model_name)
+# model = LLM(model=model_name, max_num_batched_tokens=8192, seed=1, trust_remote_code=True)
 
 lean4_scheduler = Lean4ServerScheduler(max_concurrent_requests=1, timeout=300, memory_limit=10, name='verifier')
 
@@ -31,20 +31,20 @@ theorem amc12b_2003_p6 (a r : ℝ) (u : ℕ → ℝ) (h₀ : ∀ k, u k = a * r 
   (h₂ : u 3 = 6) : u 0 = 2 / Real.sqrt 3 ∨ u 0 = -(2 / Real.sqrt 3) := by
 '''
 
-sampling_params = SamplingParams(
-    temperature=0.0,
-    max_tokens=2048,
-    top_p=0.1,
-    n=1,
-)
-model_inputs = [prompt + code_prefix]
-model_outputs = model.generate(
-    model_inputs,
-    sampling_params,
-    use_tqdm=False,
-)
-result = prompt + code_prefix + model_outputs[0].outputs[0].text
-print(result)
+# sampling_params = SamplingParams(
+#     temperature=0.0,
+#     max_tokens=2048,
+#     top_p=0.1,
+#     n=1,
+# )
+# model_inputs = [prompt + code_prefix]
+# model_outputs = model.generate(
+#     model_inputs,
+#     sampling_params,
+#     use_tqdm=False,
+# )
+# result = prompt + code_prefix + model_outputs[0].outputs[0].text
+# print(result)
 
 # Expected output:
 '''  simp_all only [Nat.one_eq_succ_zero, Nat.zero_eq, zero_add, Nat.add_succ, Nat.add_zero,
@@ -66,7 +66,7 @@ import Mathlib\nimport Aesop\n\nset_option maxHeartbeats 0\n\nopen BigOperators 
 ```
 """
 
-request_id_list = lean4_scheduler.submit_all_request([re.search(r'```lean4\n(.*?)\n```', result, re.DOTALL).group(1)])
+request_id_list = lean4_scheduler.submit_all_request([re.search(r'```lean4\n(.*?)\n```', test, re.DOTALL).group(1)])
 #request_id_list = lean4_scheduler.submit_all_request([re.search(r'```lean4\n(.*?)\n```', test, re.DOTALL).group(1)])
 outputs_list = lean4_scheduler.get_all_request_outputs(request_id_list)
 print(outputs_list[0])
