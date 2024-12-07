@@ -8,7 +8,8 @@ https://github.com/vinli0921/LLM-proof/blob/main/README.md
 - Run these commands
 ```
 git clone --recurse-submodules https://github.com/vinli0921/LLM-proof.git
-cd mathlib
+cd LLM-proof
+cd mathlib4
 lake build
 ```
 
@@ -61,19 +62,33 @@ run the file **neo4j_kg.py**
 
 # 3. Running Tests
 ## 3.1 Configuring the LLMS
-- Go to retrieval.py
-- You can change the LLM model by changing the model name string in the constructor of the BaseProver class
+- Go to retrieval_agent_RAG.py and retrieval_agent.py
+- You can change the LLM model of the Proof Generation agent by specifiying the model name string in the constructor located in the main method. Default model is GPT-4o.
 
 ## 3.2 Configuring the datasets
-- Go to retrieval.py
-- You can change the datasets by changing the dataset name string in the load_test_data function located in the main method
-- Recommended: rename the output file name with llm-model_dataset-name.json
+- Go to retrieval_agent_RAG.py and retrieval_agent.py
+- You can change the datasets by changing the dataset name string in the load_test_data function located in the main method.
+- Currently, there are two datasets:
+  - datasets/minif2f.jsonl
+  - datasets/proofnet.jsonl
+- Please also rename both the logging and results files to fit the context.
 
-## 3.3 Running the file
+## 3.3 Running the files
+**Before running the file:** ensure that the system you are on has the command ```killall```.\
+You can check by running the following in a terminal:
 ```
-python retrieval.py
+which killall
+```
+If this command doesn't exist in the system, please install it using the folowing commands:
+```
+sudo apt-get update
+sudo apt-get install psmisc
+```
+You should now be able to run the files:
+```
+python retrieval_agent.py
 ```
 or
 ```
-python3 retrieval.py
+python3 retrieval_agent.py
 ```
