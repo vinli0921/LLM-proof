@@ -284,6 +284,7 @@ class TwoAgentProver:
                 except Exception as e:
                     print(f"Error on attempt {attempt + 1}: {e}")
                     self._log_attempt(
+                        problem=test_case.name,
                         prompt=test_case.informal_prefix,
                         depth=depth,
                         attempt=attempt + 1,
@@ -364,14 +365,14 @@ if __name__ == "__main__":
             auto_formalizer=auto_formalizer,
             max_depth=2,
             max_attempts=1,
-            log_file='two_agent_prover_results.csv'
+            log_file='RAG_two_agent_prover_results.csv'
         )
         
         # Run evaluation
         results = run_evaluation(
             prover,
             test_cases,
-            'two_agent_prover_results.json'
+            'RAG_two_agent_prover_results.json'
         )
         
     finally:

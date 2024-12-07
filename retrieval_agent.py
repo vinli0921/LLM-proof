@@ -230,6 +230,7 @@ class TwoAgentProver:
                 except Exception as e:
                     print(f"Error on attempt {attempt + 1}: {e}")
                     self._log_attempt(
+                        problem=test_case.name,
                         prompt=test_case.informal_prefix,
                         depth=depth,
                         attempt=attempt + 1,
