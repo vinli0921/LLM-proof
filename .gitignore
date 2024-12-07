@@ -20,3 +20,6 @@ __pycache__/
 
 # python version
 .python-version
+
+# mathlib
+mathlib4/
