@@ -17,6 +17,7 @@
 
 # python cache files
 __pycache__/
+**/__pycache__/
 
 # python version
 .python-version
