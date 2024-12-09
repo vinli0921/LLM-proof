@@ -149,7 +149,7 @@ class TwoAgentProver:
         pass
 
     def _verify_lean_proof(self, formal_proof: str) -> Tuple[bool, Optional[Dict]]:
-        match = re.search(r'```lean4\n(.*?)\n```', formal_proof, re.DOTALL)
+        match = re.search(r'```lean4?\n(.*?)\n```', formal_proof, re.DOTALL)
         if not match:
             return False, {"errors": ["No code block found"]}
 
