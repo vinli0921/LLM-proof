@@ -307,7 +307,7 @@ if __name__ == "__main__":
             proof_generator=proof_generator,
             auto_formalizer=auto_formalizer,
             max_depth=0,
-            max_attempts=1,
+            max_attempts=3,
             log_file='two_agent_prover_results.csv'
         )
         
