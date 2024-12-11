@@ -163,7 +163,7 @@ class TwoAgentProver:
             self.driver.close()
 
     def _verify_lean_proof(self, formal_proof: str) -> Tuple[bool, Optional[Dict]]:
-        request_id_list = self.lean4_scheduler.submit_all_request([re.search(r'```lean4\n(.*?)\n```',formal_proof, re.DOTALL).group(1)])
+        request_id_list = self.lean4_scheduler.submit_all_request([re.search(r'```lean4?\n(.*?)\n```',formal_proof, re.DOTALL).group(1)])
         outputs_list = self.lean4_scheduler.get_all_request_outputs(request_id_list)
         result = outputs_list[0]
         print(result)
