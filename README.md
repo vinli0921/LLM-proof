@@ -92,3 +92,7 @@ or
 ```
 python3 retrieval_agent.py
 ```
+If you want to use multiple GPUS (nvidia):
+```
+CUDA_VISIBLE_DEVICES=0,1 python3 retrieval_agent.py
+```
