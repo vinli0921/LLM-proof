@@ -1,5 +1,6 @@
 import openai
 import numpy as np
+import json
 from typing import Any
 from langchain.schema import Document
 from langchain.schema.retriever import BaseRetriever
@@ -15,6 +16,29 @@ class Neo4jVectorRetriever(BaseRetriever):
         )
         query_embedding = response.data[0].embedding
         return query_embedding
+    
+    def structure_node_content(self, node):
+        """Structure mathematical content from node."""
+        content_parts = []
+        
+        if node.get('title'):
+            content_parts.append(f"Title: {node['title']}")
+        
+        if node.get('theorem'):
+            content_parts.append(f"Theorem: {node['theorem']}")
+        
+        if node.get('proof'):
+            content_parts.append(f"Proof: {node['proof']}")
+            
+        try:
+            if node.get('math_expressions'):
+                expressions = json.loads(node['math_expressions'])
+                if expressions:
+                    content_parts.append(f"Mathematical Expressions: {' '.join(expressions)}")
+        except json.JSONDecodeError:
+            pass
+            
+        return "\n\n".join(content_parts)
 
     def get_top_node(self, query_embedding):
         with self.driver.session() as session:
@@ -23,7 +47,7 @@ class Neo4jVectorRetriever(BaseRetriever):
         if results:
             record = results[0]
             node = record['node']
-            content = node.get('content', '')
+            content = self.structure_node_content(node)
             node_id = node.get('id')
             return node_id, content
         else:
@@ -34,7 +58,12 @@ class Neo4jVectorRetriever(BaseRetriever):
             results = session.read_transaction(
                 self._get_neighbors_tx, node_id, top_k
             )
-        return results
+        # Structure the content for each neighbor
+        structured_results = []
+        for result in results:
+            result['content'] = self.structure_node_content(result)
+            structured_results.append(result)
+        return structured_results
 
     def _get_relevant_documents(self, query):
         query_embedding = self.get_query_embedding(query)
@@ -44,10 +73,11 @@ class Neo4jVectorRetriever(BaseRetriever):
         documents = []
         for record in results:
             node = record['node']
-            content = node.get('content', '')
+            content = self.structure_node_content(node)
             metadata = {
                 'id': node.get('id'),
-                'similarity': record.get('score')
+                'similarity': record.get('score'),
+                'type': node.get('type')
             }
             doc = Document(page_content=content, metadata=metadata)
             documents.append(doc)
@@ -71,11 +101,31 @@ class Neo4jVectorRetriever(BaseRetriever):
 
     @staticmethod
     def _get_neighbors_tx(tx, node_id, top_k):
+        # Updated to use relationship types and mathematical structure
         result = tx.run("""
-        MATCH (n)-[]->(neighbor)
+        MATCH (n)-[r:LINK]->(neighbor)
         WHERE n.id = $node_id
-        RETURN neighbor.id AS id, neighbor.content AS content, neighbor.plotEmbedding AS embedding
+        WITH neighbor, r.type AS rel_type, r.context AS context,
+             CASE r.type 
+                WHEN 'USES_DEFINITION' THEN 5
+                WHEN 'USES_THEOREM' THEN 4
+                WHEN 'PROOF_TECHNIQUE' THEN 3
+                WHEN 'SIMILAR_PROOF' THEN 2
+                ELSE 1
+             END as type_weight
+        RETURN 
+            neighbor.id AS id,
+            neighbor.title AS title,
+            neighbor.theorem AS theorem,
+            neighbor.proof AS proof,
+            neighbor.math_expressions AS math_expressions,
+            neighbor.plotEmbedding AS embedding,
+            rel_type,
+            context,
+            type_weight
+        ORDER BY type_weight DESC
         LIMIT $top_k
         """, node_id=node_id, top_k=top_k)
+        
         neighbors = [record.data() for record in result]
         return neighbors

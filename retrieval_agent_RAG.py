@@ -56,12 +56,19 @@ class ProofGenerator:
         prompt_template = ChatPromptTemplate.from_messages([
             ("system", "You are a mathematics expert focused on generating clear informal proofs."),
             ("user", """Given the following mathematical problem and context, generate a clear and detailed informal proof in natural language.
-Do not attempt to formalize the proof - focus only on explaining the mathematical reasoning clearly.
+Do not attempt to formalize the proof yet - focus only on explaining the mathematical reasoning clearly.
+
+The context contains theorems, proofs, and mathematical expressions that may be relevant to solving this problem.
+Pay special attention to:
+- Similar theorem statements
+- Related proof techniques
+- Mathematical patterns and structures
+- Definitions and axioms used
 
 Context:
 {context}
 
-Problem:
+Problem to Prove:
 {problem}
 
 Provide your proof in the following format:
