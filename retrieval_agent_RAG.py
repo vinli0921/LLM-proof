@@ -101,11 +101,39 @@ class AutoFormalizer:
     
     def formalize_proof(self, header: str, informal_proof: str, informal_prefix: str, formal_statement: str, goal: str) -> str:
         # Construct the prompt
-        #prompt = "Convert the following informal mathematical proof into a formal Lean 4 proof."
-        prompt = f"Complete the following Lean 4 code, utilizing the the following informal proof as guidance:\n{informal_proof}\n\n"
-        # Combine the header, informal proof, and goal
-        code_prefix = f"You must generate the lean code in this format:\n```lean4\n{header}{informal_prefix}{formal_statement}\n```\n\n\n"
+        # #prompt = "Convert the following informal mathematical proof into a formal Lean 4 proof."
+        # prompt = f"Complete the following Lean 4 code, utilizing the the following informal proof as guidance:\n{informal_proof}\n\n"
+        # # Combine the header, informal proof, and goal
+        # code_prefix = f"You must generate the lean code in this format:\n```lean4\n{header}{informal_prefix}{formal_statement}\n```\n\n\n"
+        
+        prompt = f"""You are a Lean 4 code generator. 
+We have:
+  HEADER:
+{header}
 
+  INFORMAL PROOF:
+{informal_proof}
+
+  PREFIX:
+{informal_prefix}
+
+  STATEMENT:
+{formal_statement}
+
+GOAL (optional):
+{goal}
+
+INSTRUCTIONS:
+1. Output exactly one triple-backtick code block containing valid Lean 4 code.
+2. Do not include any text or explanations outside the code block.
+3. Make sure it compiles in Lean 4.
+
+Required Format:
+# Start
+```lean4
+<Lean code here>
+```  # End
+"""
         # Set up sampling parameters
         sampling_params = SamplingParams(
             temperature=self.temperature,
@@ -114,19 +142,19 @@ class AutoFormalizer:
             n=1,
         )
 
-        model_input = prompt + code_prefix
+        # model_input = prompt + code_prefix
 
         # Generate the formal proof using the DeepSeek model
         model_outputs = self.model.generate(
-            [model_input],
+            [prompt],
             sampling_params,
             use_tqdm=False,
         )
 
         generated_text = model_outputs[0].outputs[0].text
 
-        formal_proof = code_prefix + "\ngenerated text\n" + generated_text
-        print(formal_proof)
+        # formal_proof = code_prefix + "\ngenerated text\n" + generated_text
+        # print(formal_proof)
 
         # Return the formal proof
         return generated_text.strip()
@@ -163,7 +191,7 @@ class TwoAgentProver:
         
         with open(self.log_file, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(['prompt', 'depth', 'attempt', 'informal_proof', 'formal_proof', 'passed'])
+            writer.writerow(['prompt', 'depth', 'attempt', 'visited_node_ids', 'informal_proof', 'formal_proof', 'passed'])
     
     def __del__(self):
         if hasattr(self, 'driver'):
@@ -176,24 +204,28 @@ class TwoAgentProver:
         print(result)
         return (result['pass'] == True and result['complete'] == True), result
 
-    def _log_attempt(self, problem: str, prompt: str, depth: int, attempt: int, 
+    def _log_attempt(self, problem: str, prompt: str, depth: int, attempt: int, visited_node_ids: List[str],
                     informal_proof: str, formal_proof: str, passed: bool):
         with open(self.log_file, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             informal_escaped = informal_proof.replace('\n', '\\n')
             formal_escaped = formal_proof.replace('\n', '\\n')
-            writer.writerow([problem, prompt, depth, attempt, informal_escaped, formal_escaped, passed])
+            visited_str = ",".join(visited_node_ids)
+            
+            writer.writerow([problem, prompt, depth, attempt, visited_str, informal_escaped, formal_escaped, passed])
 
     def _get_rag_context(self, query: str, depth: int) -> str:
         query_embedding = self.retriever.get_query_embedding(query)
         context = ""
+        visited_ids = []
         current_node_id = None
         
         for d in range(depth + 1):
             if d == 0:
                 current_node_id, content = self.retriever.get_top_node(query_embedding)
                 if current_node_id is None:
-                    return ""
+                    return "", []
+                visited_ids.append(str(current_node_id))
                 context += f"{current_node_id}:\n{content}\n\n"
             else:
                 neighbors = self.retriever.get_neighbors(current_node_id, self.retriever.top_k)
@@ -214,11 +246,12 @@ class TwoAgentProver:
                 for _, neighbor in top_neighbors:
                     content = neighbor.get('content', '')
                     node_id = neighbor.get('id')
+                    visited_ids.append(str(node_id))
                     context += f"{node_id}:\n{content}\n\n"
                 
                 current_node_id = top_neighbors[0][1]['id']
         
-        return context.strip()
+        return context.strip(), visited_ids
 
     def _cosine_similarity(self, a, b):
         a = np.array(a)
@@ -232,7 +265,7 @@ class TwoAgentProver:
             print(f"\nTrying at depth {depth}")
             
             # Get RAG context for current depth
-            rag_context = self._get_rag_context(test_case.informal_prefix, depth)
+            rag_context, visited_node_ids = self._get_rag_context(test_case.informal_prefix, depth)
             if not rag_context:
                 print(f"No context found at depth {depth}, moving to next depth")
                 continue
@@ -266,6 +299,7 @@ class TwoAgentProver:
                         prompt=test_case.informal_prefix,
                         depth=depth,
                         attempt=attempt + 1,
+                        visited_node_ids=visited_node_ids,
                         informal_proof=informal_proof,
                         formal_proof=formal_proof,
                         passed=passes
@@ -276,6 +310,7 @@ class TwoAgentProver:
                         return {
                             'name': test_case.name,
                             'passed': True,
+                            'visited_node_ids': visited_node_ids,
                             'informal_proof': informal_proof,
                             'lean_code': output.get("verified_code"),
                             'depth': depth,
@@ -295,6 +330,7 @@ class TwoAgentProver:
                         prompt=test_case.informal_prefix,
                         depth=depth,
                         attempt=attempt + 1,
+                        visited_node_ids=visited_node_ids,
                         informal_proof=str(e),
                         formal_proof="",
                         passed=False
@@ -304,6 +340,7 @@ class TwoAgentProver:
         return {
             'name': test_case.name,
             'passed': False,
+            'visited_node_ids': visited_node_ids,
             'informal_proof': informal_proof,
             'lean_code': None,
             'depth': self.max_depth,
