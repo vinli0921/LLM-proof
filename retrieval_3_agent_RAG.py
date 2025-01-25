@@ -150,13 +150,10 @@ class AutoFormalizer:
     
     def formalize_proof(self, header: str, pseudocode: str, informal_proof: str, informal_prefix: str, formal_statement: str, goal: str) -> str:
         # Construct the prompt
-        prompt = f"""You are a Lean 4 code generator. 
+        prompt = f"""You are a Lean 4 code generator. Utilize the below information and follow the instructions.
 We have:
   HEADER:
 {header}
-
-  INFORMAL PROOF:
-{informal_proof}
 
   PSEUDOCODE:
 {pseudocode}
