@@ -259,113 +259,92 @@ class TwoAgentProver:
         if np.linalg.norm(a) == 0 or np.linalg.norm(b) == 0:
             return 0
         return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
-    
-    def _get_single_node_context(self, query: str) -> Tuple[str, str]:
-        """
-        Retrieves only the top single node from the Neo4j database.
-        Returns a tuple of (context_content, node_id).
-        If no node is found, returns ("", "").
-        """
-        query_embedding = self.retriever.get_query_embedding(query)
-        node_id, content = self.retriever.get_top_node(query_embedding)
-        if node_id is None:
-            return "", ""
-        return content, node_id
 
     def process_test_case(self, test_case: TestCase) -> Dict:
-         # 1) Get single-node context
-        context_content, node_id = self._get_single_node_context(test_case.informal_prefix)
-        if not context_content:
-            print(f"No single-node context found for {test_case.name}")
-            # We still return a "failed" result
-            return {
-                'name': test_case.name,
-                'passed': False,
-                'informal_proof': "",
-                'pseudocode': None,
-                'lean_code': None,
-                'attempts': 0,
-                'node_id': None
-            }
-        
-        # 2) Generate informal proof
-        informal_proof = self.proof_generator.generate_proof(
-            context_content, 
-            test_case.informal_prefix
-        )
-
-        # Try multiple attempts to formalize
-        for attempt in range(self.max_attempts):
-            try:
-                print(f"Processing {test_case.name}, Attempt {attempt + 1}")
-                
-                # 2.5) Convert informal proof to pseudocode
-                pseudocode = self.pseudocode_generator.generate_pseudocode(informal_proof)
-                
-                # 3) Formalize to Lean code
-                formal_proof = self.auto_formalizer.formalize_proof(
-                    test_case.header,
-                    pseudocode,
-                    informal_proof,   # pass the informal proof as well
-                    test_case.informal_prefix,
-                    test_case.formal_statement,
-                    test_case.goal
-                )
-
-                # Verify with Lean
-                passes, output = self._verify_lean_proof(formal_proof)
-                
-                # Log attempt
-                self._log_attempt(
-                    problem=test_case.name,
-                    prompt=test_case.informal_prefix,
-                    attempt=attempt + 1,
-                    informal_proof=informal_proof,
-                    pseudocode=pseudocode,
-                    formal_proof=formal_proof,
-                    passed=passes,
-                    node_id=node_id
-                )
-
-                if passes:
-                    print(f"Attempt {attempt + 1} succeeded for {test_case.name}")
-                    return {
-                        'name': test_case.name,
-                        'passed': True,
-                        'informal_proof': informal_proof,
-                        'pseudocode': pseudocode,
-                        'lean_code': output.get("verified_code"),
-                        'attempts': attempt + 1,
-                        'node_id': node_id
-                    }
-                
-                # If verification failed, add error context for next attempt
-                if isinstance(output, dict) and 'errors' in output:
-                    error_context = "\n".join([err.get('data', '') for err in output['errors']])
-                    informal_proof += f"\nPrevious attempt failed with: {error_context}\nPlease revise the reasoning."
+        for depth in range(self.max_depth + 1):
+            print(f"\nTrying at depth {depth}")
             
-            except Exception as e:
-                print(f"Error on attempt {attempt + 1}: {e}")
-                self._log_attempt(
-                    problem=test_case.name,
-                    prompt=test_case.informal_prefix,
-                    attempt=attempt + 1,
-                    informal_proof=str(e),
-                    pseudocode="",
-                    formal_proof="",
-                    passed=False,
-                    node_id=node_id
-                )
+            # Get RAG context for current depth
+            rag_context, visited_node_ids = self._get_rag_context(test_case.informal_prefix, depth)
+            if not rag_context:
+                print(f"No context found at depth {depth}, moving to next depth")
+                continue
+            
+            # Generate informal proof using RAG context
+            informal_proof = self.proof_generator.generate_proof(
+                rag_context, 
+                test_case.informal_prefix
+            )
+            
+            # Try multiple formalization attempts
+            for attempt in range(self.max_attempts):
+                try:
+                    print(f"Processing {test_case.name}, Depth {depth}, Attempt {attempt + 1}")
+                    
+                    # Formalize the proof
+                    formal_proof = self.auto_formalizer.formalize_proof(
+                        test_case.header,
+                        informal_proof,
+                        test_case.informal_prefix,
+                        test_case.formal_statement,
+                        test_case.goal
+                    )
+                    
+                    # Verify with Lean
+                    passes, output = self._verify_lean_proof(formal_proof)
+                    
+                    # Log the attempt
+                    self._log_attempt(
+                        problem=test_case.name,
+                        prompt=test_case.informal_prefix,
+                        depth=depth,
+                        attempt=attempt + 1,
+                        visited_node_ids=visited_node_ids,
+                        informal_proof=informal_proof,
+                        formal_proof=formal_proof,
+                        passed=passes
+                    )
+                    
+                    if passes:
+                        print(f"Depth {depth}, Attempt {attempt + 1} succeeded")
+                        return {
+                            'name': test_case.name,
+                            'passed': True,
+                            'visited_node_ids': visited_node_ids,
+                            'informal_proof': informal_proof,
+                            'lean_code': output.get("verified_code"),
+                            'depth': depth,
+                            'attempts': attempt + 1
+                        }
+                    
+                    # If verification failed, add error context for next attempt
+                    if isinstance(output, dict) and 'errors' in output:
+                        #failed_code = "\n".join([error.get('code', '') for error in output['errors']])
+                        error_context = "\n".join([error.get('data', '') for error in output['errors']])
+                        informal_proof += f"\nPrevious attempt failed with: {error_context}\nPlease revise the proof."
+                
+                except Exception as e:
+                    print(f"Error on attempt {attempt + 1}: {e}")
+                    self._log_attempt(
+                        problem=test_case.name,
+                        prompt=test_case.informal_prefix,
+                        depth=depth,
+                        attempt=attempt + 1,
+                        visited_node_ids=visited_node_ids,
+                        informal_proof=str(e),
+                        formal_proof="",
+                        passed=False
+                    )
 
-        # If we get here, all attempts failed
+        # If we get here, all depths and attempts failed
         return {
             'name': test_case.name,
             'passed': False,
+            'visited_node_ids': visited_node_ids,
             'informal_proof': informal_proof,
-            'pseudocode': None,
             'lean_code': None,
-            'attempts': self.max_attempts,
-            'node_id': node_id
+            'depth': self.max_depth,
+            'attempts': self.max_attempts
         }
 
 def load_test_data(file_path: str) -> List[TestCase]:
@@ -428,16 +407,16 @@ if __name__ == "__main__":
             neo4j_password=os.environ.get('NEO4J_PASSWORD'),
             proof_generator=proof_generator,
             auto_formalizer=auto_formalizer,
-            max_depth=2,
-            max_attempts=1,
-            log_file='RAG_two_agent_prover_results.csv'
+            max_depth=0,
+            max_attempts=3,
+            log_file='RAG_results.csv'
         )
         
         # Run evaluation
         results = run_evaluation(
             prover,
             test_cases,
-            'RAG_two_agent_prover_results.json'
+            'RAG_results.json'
         )
         
     finally:

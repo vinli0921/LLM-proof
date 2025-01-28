@@ -409,14 +409,14 @@ if __name__ == "__main__":
             auto_formalizer=auto_formalizer,
             max_depth=2,
             max_attempts=1,
-            log_file='RAG_two_agent_prover_results.csv'
+            log_file='Graph_RAG_results.csv'
         )
         
         # Run evaluation
         results = run_evaluation(
             prover,
             test_cases,
-            'RAG_two_agent_prover_results.json'
+            'Graph_RAG_results.json'
         )
         
     finally:

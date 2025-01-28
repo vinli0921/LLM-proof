@@ -36,7 +36,7 @@ class ProofAttempt:
 
 class ProofGenerator:
     """Responsible for generating informal mathematical proofs"""
-    def __init__(self, model_type="gpt-4o", temperature=0):
+    def __init__(self, model_type="o1", temperature=0):
         if "gpt" in model_type.lower() or "o1" in model_type.lower():
             self.llm = ChatOpenAI(
                 model_name=model_type,
@@ -88,10 +88,34 @@ class AutoFormalizer:
         self.temperature = temperature
     
     def formalize_proof(self, header: str, informal_proof: str, informal_prefix: str, formal_statement: str, goal: str) -> str:
-        # Construct the prompt
-        prompt = f"Complete the following Lean 4 code, utilizing the the following informal proof as guidance:\n{informal_proof}\n\n"
-        # Combine the header, informal proof, and goal
-        code_prefix = f"You must generate the lean code in this format:\n```lean4\n{header}{informal_prefix}{formal_statement}\n```\n\n\n"
+        prompt = f"""You are a Lean 4 code generator. 
+We have:
+  HEADER:
+{header}
+
+  INFORMAL PROOF:
+{informal_proof}
+
+  PREFIX:
+{informal_prefix}
+
+  STATEMENT:
+{formal_statement}
+
+GOAL (optional):
+{goal}
+
+INSTRUCTIONS:
+1. Output exactly one triple-backtick code block containing valid Lean 4 code.
+2. Do not include any text or explanations outside the code block.
+3. Make sure it compiles in Lean 4.
+
+Required Format:
+# Start
+```lean4
+<Lean code here>
+```  # End
+"""
 
         # Set up sampling parameters
         sampling_params = SamplingParams(
@@ -101,18 +125,16 @@ class AutoFormalizer:
             n=1,
         )
 
-        model_input = prompt + code_prefix
-
         # Generate the formal proof using the DeepSeek model
         model_outputs = self.model.generate(
-            [model_input],
+            [prompt],
             sampling_params,
             use_tqdm=False,
         )
 
         generated_text = model_outputs[0].outputs[0].text
 
-        formal_proof = code_prefix + "\ngenerated text\n" + generated_text
+        formal_proof = informal_prefix + "\ngenerated text\n" + generated_text
         print(formal_proof)
 
         # Return the formal proof
