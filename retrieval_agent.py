@@ -37,10 +37,17 @@ class ProofAttempt:
 class ProofGenerator:
     """Responsible for generating informal mathematical proofs"""
     def __init__(self, model_type="o1", temperature=0):
-        if "gpt" in model_type.lower() or "o1" in model_type.lower():
+        self.model_name = model_type
+        if "gpt" in model_type.lower():
             self.llm = ChatOpenAI(
                 model_name=model_type,
                 temperature=temperature,
+                openai_api_key=os.environ.get('OPENAI_API_KEY')
+            )
+            self.use_anthropic = False
+        elif "o1" in model_type.lower():
+            self.llm = ChatOpenAI(
+                model_name=model_type,
                 openai_api_key=os.environ.get('OPENAI_API_KEY')
             )
             self.use_anthropic = False
@@ -51,9 +58,10 @@ class ProofGenerator:
             self.use_anthropic = True
             
     def generate_proof(self, context: str, problem: str) -> str:
-        prompt_template = ChatPromptTemplate.from_messages([
-            ("system", "You are a mathematics expert focused on generating clear informal proofs."),
-            ("user", """Given the following mathematical problem, generate a clear and detailed informal proof in natural language.
+        if not self.model_name.lower().startswith("o1"):
+            prompt_template = ChatPromptTemplate.from_messages([
+                ("system", "You are a mathematics expert focused on generating clear informal proofs."),
+                ("user", """Given the following mathematical problem, generate a clear and detailed informal proof in natural language.
 Do not attempt to formalize the proof - focus only on explaining the mathematical reasoning clearly.
 
 Problem:
@@ -65,6 +73,21 @@ Provide your proof in the following format:
 [Your natural language proof here]
 """)
         ])
+        else:
+            prompt_template = ChatPromptTemplate.from_messages(
+                ("user", """You are a mathematics expert focused on generating clear informal proofs.
+Given the following mathematical problem, generate a clear and detailed informal proof in natural language.
+Do not attempt to formalize the proof - focus only on explaining the mathematical reasoning clearly.
+
+Problem:
+{problem}
+
+Provide your proof in the following format:
+
+# Informal Proof:
+[Your natural language proof here]
+""")
+            )
         if self.use_anthropic:
             response = self.client.messages.create(
                 model=self.model_name,
