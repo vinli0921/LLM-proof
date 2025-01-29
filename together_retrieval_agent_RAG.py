@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 
+from together import Together
 from neo4j import GraphDatabase
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -38,56 +39,29 @@ class ProofAttempt:
 
 class ProofGenerator:
     """Responsible for generating informal mathematical proofs"""
-    def __init__(self, model_type="gpt-4o", temperature=0):
+    def __init__(self, model_type="deepseek-ai/DeepSeek-R1", temperature=0):
         self.model_name = model_type
-        if "gpt" in model_type.lower():
-            self.llm = ChatOpenAI(
-                model_name=model_type,
-                temperature=temperature,
-                openai_api_key=os.environ.get('OPENAI_API_KEY')
-            )
-            self.use_anthropic = False
-        elif "o1" in model_type.lower():
-            self.llm = ChatOpenAI(
-                model_name=model_type,
-                openai_api_key=os.environ.get('OPENAI_API_KEY')
-            )
-            self.use_anthropic = False
-        else:
-            self.client = Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+        self.temperature = temperature
+        self.client = Together(api_key=os.environ.get('TOGETHER_API_KEY'))
+        
+        # Map of supported models
+        self.supported_models = {
+            "deepseek-r1": "deepseek-ai/DeepSeek-R1",
+            "llama-3-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo-128K",
+            "llama-3-70b": "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+        }
+        
+        # Validate and set model
+        if model_type in self.supported_models:
+            self.model_name = self.supported_models[model_type]
+        elif any(model_type == full_name for full_name in self.supported_models.values()):
             self.model_name = model_type
-            self.temperature = temperature
-            self.use_anthropic = True
+        else:
+            raise ValueError(f"Unsupported model type. Please use one of: {list(self.supported_models.keys())}")
             
     def generate_proof(self, context: str, problem: str) -> str:
-        if not self.model_name.lower().startswith("o1"):
-            prompt_template = ChatPromptTemplate.from_messages([
-                ("system", "You are a mathematics expert focused on generating clear informal proofs."),
-                ("user", """Given the following mathematical problem and context, generate a clear and detailed informal proof in natural language.
-Do not attempt to formalize the proof yet - focus only on explaining the mathematical reasoning clearly.
-
-The context contains theorems, proofs, and mathematical expressions that may be relevant to solving this problem.
-Pay special attention to:
-- Similar theorem statements
-- Related proof techniques
-- Mathematical patterns and structures
-- Definitions and axioms used
-
-Context:
-{context}
-
-Problem to Prove:
-{problem}
-
-Provide your proof in the following format:
-
-# Informal Proof:
-[Your natural language proof here]
-    """)
-            ])
-        else:
-            prompt_template = ChatPromptTemplate.from_messages(
-                ("user", """You are a mathematics expert focused on generating clear informal proofs.
+        # Using the RAG-specific prompt template
+        prompt_template = """You are a mathematics expert focused on generating clear informal proofs.
 Given the following mathematical problem and context, generate a clear and detailed informal proof in natural language.
 Do not attempt to formalize the proof yet - focus only on explaining the mathematical reasoning clearly.
 
@@ -108,22 +82,25 @@ Provide your proof in the following format:
 
 # Informal Proof:
 [Your natural language proof here]
-    """)
-            )
-        if self.use_anthropic:
-            response = self.client.messages.create(
-                model=self.model_name,
-                temperature=self.temperature,
-                max_tokens=4096,
-                messages=[{"role": "user", "content": prompt_template}]
-            )
-            return response.content[0].text.strip()
-        else:
-            chain = prompt_template | self.llm | StrOutputParser()
-            return chain.invoke({
-                "context": context,
-                "problem": problem
-            }).strip()
+"""
+
+        formatted_prompt = prompt_template.format(
+            context=context,
+            problem=problem
+        )
+        
+        # Create the chat completion request
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": "You are a mathematics expert focused on generating clear informal proofs."},
+                {"role": "user", "content": formatted_prompt}
+            ],
+            temperature=self.temperature,
+            max_tokens=4096
+        )
+        
+        return response.choices[0].message.content.strip()
 
 class AutoFormalizer:
     """Responsible for converting informal proofs to Lean 4 formal proofs"""
@@ -424,7 +401,7 @@ if __name__ == "__main__":
         name='verifier'
     )
     
-    proof_generator = ProofGenerator(model_type="o1-mini")
+    proof_generator = ProofGenerator(model_type="llama-3-8b")
     auto_formalizer = AutoFormalizer()
     
     try:
@@ -442,14 +419,14 @@ if __name__ == "__main__":
             auto_formalizer=auto_formalizer,
             max_depth=0,
             max_attempts=3,
-            log_file='p_o1_RAG_results.csv'
+            log_file='p_8b_RAG_results.csv'
         )
         
         # Run evaluation
         results = run_evaluation(
             prover,
             test_cases,
-            'p_o1_RAG_results.json'
+            'p_8b_RAG_results.json'
         )
         
     finally:
