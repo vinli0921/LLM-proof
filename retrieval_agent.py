@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
+from together import Together
 
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
@@ -58,10 +59,8 @@ class ProofGenerator:
             self.use_anthropic = True
             
     def generate_proof(self, context: str, problem: str) -> str:
-        if not self.model_name.lower().startswith("o1"):
-            prompt_template = ChatPromptTemplate.from_messages([
-                ("system", "You are a mathematics expert focused on generating clear informal proofs."),
-                ("user", """Given the following mathematical problem, generate a clear and detailed informal proof in natural language.
+        system_prompt = "You are a mathematics expert focused on generating clear informal proofs."
+        user_prompt = """Given the following mathematical problem, generate a clear and detailed informal proof in natural language.
 Do not attempt to formalize the proof - focus only on explaining the mathematical reasoning clearly.
 
 Problem:
@@ -71,32 +70,32 @@ Provide your proof in the following format:
 
 # Informal Proof:
 [Your natural language proof here]
-""")
-        ])
-        else:
-            prompt_template = ChatPromptTemplate.from_messages(
-                ("user", """You are a mathematics expert focused on generating clear informal proofs.
-Given the following mathematical problem, generate a clear and detailed informal proof in natural language.
-Do not attempt to formalize the proof - focus only on explaining the mathematical reasoning clearly.
-
-Problem:
-{problem}
-
-Provide your proof in the following format:
-
-# Informal Proof:
-[Your natural language proof here]
-""")
-            )
+"""
+        
         if self.use_anthropic:
             response = self.client.messages.create(
                 model=self.model_name,
                 temperature=self.temperature,
                 max_tokens=4096,
-                messages=[{"role": "user", "content": prompt_template}]
+                system=system_prompt,  
+                messages=[{
+                    "role": "user",
+                    "content": user_prompt.format(problem=problem)
+                }]
             )
             return response.content[0].text.strip()
         else:
+            if not self.model_name.lower().startswith("o1"):
+                prompt_template = ChatPromptTemplate.from_messages([
+                    ("system", system_prompt),
+                    ("user", user_prompt)
+                ])
+            else:
+                # For O1 models, combine system and user prompts
+                prompt_template = ChatPromptTemplate.from_messages([
+                    ("user", f"{system_prompt}\n\n{user_prompt}")
+                ])
+            
             chain = prompt_template | self.llm | StrOutputParser()
             return chain.invoke({
                 "context": context,
@@ -338,12 +337,12 @@ if __name__ == "__main__":
         name='verifier'
     )
     
-    proof_generator = ProofGenerator(model_type="gpt-4o-mini")
+    proof_generator = ProofGenerator(model_type="claude-3-5-sonnet-latest")
     auto_formalizer = AutoFormalizer()
     
     try:
         # Load test data
-        test_cases = load_test_data('datasets/minif2f.jsonl')
+        test_cases = load_test_data('datasets/mustard_short.jsonl')
         print(f"Total test cases: {len(test_cases)}")
         
         # Create two-agent prover (no RAG)
@@ -353,14 +352,14 @@ if __name__ == "__main__":
             auto_formalizer=auto_formalizer,
             max_depth=0,
             max_attempts=3,
-            log_file='two_agent_prover_results.csv'
+            log_file='ms_sonnet_base_results.csv'
         )
         
         # Run evaluation
         results = run_evaluation(
             prover,
             test_cases,
-            'two_agent_prover_results.json'
+            'ms_sonnet_base_results.json'
         )
         
     finally:
