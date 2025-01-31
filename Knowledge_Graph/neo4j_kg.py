@@ -4,6 +4,7 @@ from neo4j import GraphDatabase
 import pandas as pd
 import json
 import re
+from typing import Dict
 
 load_dotenv()
 
@@ -39,10 +40,15 @@ def load_nodes(session, filepath):
     """    
     
     df_nodes = pd.read_csv(filepath)
-    # convert 'id' to integer if necessary
+    # convert 'id' to integer
     df_nodes['id'] = df_nodes['id'].astype(int)
+    
+    # Convert math_expressions to proper JSON strings if they exist
+    if 'math_expressions' in df_nodes.columns:
+        df_nodes['math_expressions'] = df_nodes['math_expressions'].apply(
+            lambda x: json.dumps(x) if isinstance(x, list) else x
+        )
 
-    # batch size
     batch_size = 1000
     total_rows = len(df_nodes)
     for i in range(0, total_rows, batch_size):
@@ -67,7 +73,10 @@ def create_nodes_batch(tx, nodes):
     SET n.type = node.type,
         n.title = node.title,
         n.name = node.name,
-        n.content = node.content
+        n.content = node.content,
+        n.theorem = node.theorem,
+        n.proof = node.proof,
+        n.math_expressions = node.math_expressions
     """, nodes=nodes)
 
 def load_relationships(session, filepath):
@@ -84,8 +93,13 @@ def load_relationships(session, filepath):
     # convert IDs to integers
     df_rels['from_id'] = df_rels['from_id'].astype(int)
     df_rels['to_id'] = df_rels['to_id'].astype(int)
+    
+    # Ensure type and context exist
+    if 'context' not in df_rels.columns:
+        df_rels['context'] = ''
+    if 'type' not in df_rels.columns:
+        df_rels['type'] = 'LINK'
 
-    # batch size
     batch_size = 1000
     total_rows = len(df_rels)
     for i in range(0, total_rows, batch_size):
@@ -108,7 +122,7 @@ def create_relationships_batch(tx, relationships):
     UNWIND $relationships AS rel
     MATCH (from:Node {id: rel.from_id})
     MATCH (to:Node {id: rel.to_id})
-    MERGE (from)-[:LINK]->(to)
+     MERGE (from)-[r:LINK {type: rel.type, context: rel.context}]->(to)
     """, relationships=relationships)
     
 def append_embeddings(session, filepath, batch_size=100):
@@ -168,6 +182,10 @@ def update_embeddings_batch(tx, embeddings):
 def clean_content(content: str) -> str:
     """Clean retrieved content by removing unwanted sections and formatting while preserving proofs."""
     # Define filter patterns - removed patterns that would remove proofs and equations
+    # Handle non-string content
+    if not isinstance(content, str):
+        return ""
+    
     filter_patterns = [
         r'\[\[Category:.?\]\]',  # Category links
         r'== Also see ==.?(?=\n\n|\Z)',  # Also see sections
@@ -194,7 +212,71 @@ def clean_content(content: str) -> str:
     content = re.sub(r'\[\[(?:[^|\]]*\|)?([^\]]+)\]\]', r'\1', content)
 
     return content
+
+def clean_mathematical_content(node: Dict) -> Dict:
+    """Clean mathematical content while preserving structure."""
+    cleaned = {
+        "id": node["id"],
+        "cleaned_theorem": "",
+        "cleaned_proof": "",
+        "math_expressions": []
+    }
     
+    # Extract and clean theorem content
+    theorem = node.get("theorem", "")
+    if theorem is not None:
+        cleaned["cleaned_theorem"] = clean_content(str(theorem))
+    
+    # Extract and clean proof content
+    proof = node.get("proof", "")
+    if proof is not None:
+        cleaned["cleaned_proof"] = clean_content(str(proof))
+    
+    # Extract mathematical expressions from both theorem and proof
+    content = ""
+    if theorem is not None:
+        content += str(theorem) + " "
+    if proof is not None:
+        content += str(proof)
+        
+    math_patterns = [
+        r'\$.*?\$',  # Inline math
+        r'\\ds.*?(?=\\ds|$)',  # Display style math
+        r'\\begin\{.*?\}.*?\\end\{.*?\}'  # Environment math
+    ]
+    
+    math_expressions = []
+    for pattern in math_patterns:
+        matches = re.finditer(pattern, content, re.DOTALL)
+        math_expressions.extend(match.group(0) for match in matches)
+    
+    cleaned["math_expressions"] = json.dumps(math_expressions)
+    
+    return cleaned
+    
+def get_batch_nodes(tx, skip, limit):
+    """Retrieve nodes with mathematical content."""
+    result = tx.run("""
+        MATCH (n:Node)
+        RETURN n.id as id, 
+            n.title as title,
+            n.theorem as theorem,
+            n.proof as proof,
+            n.math_expressions as math_expressions
+        SKIP $skip
+        LIMIT $limit
+    """, skip=skip, limit=limit)
+    return [record for record in result]
+
+def update_nodes_batch(tx, nodes):
+    tx.run("""
+    UNWIND $nodes as node
+    MATCH (n:Node {id: node.id})
+    SET n.theorem = node.cleaned_theorem,
+        n.proof = node.cleaned_proof,
+        n.math_expressions = node.math_expressions
+    """, nodes=nodes)
+        
 def update_node_content(session, batch_size=1000):
     """
     Updates all node content in the Neo4j database using the content cleaning function.
@@ -207,52 +289,37 @@ def update_node_content(session, batch_size=1000):
     def get_total_nodes(tx):
         result = tx.run("MATCH (n:Node) RETURN count(n) as count")
         return result.single()["count"]
-    
+
     def get_batch_nodes(tx, skip, limit):
         result = tx.run("""
             MATCH (n:Node)
-            RETURN n.id as id, n.content as content
+            RETURN n.id as id, 
+                   n.theorem as theorem,
+                   n.proof as proof
             SKIP $skip
             LIMIT $limit
         """, skip=skip, limit=limit)
-        return [{"id": record["id"], "content": record["content"]} for record in result]
-    
-    def update_nodes_batch(tx, nodes):
-        tx.run("""
-        UNWIND $nodes as node
-        MATCH (n:Node {id: node.id})
-        SET n.content = node.cleaned_content
-        """, nodes=nodes)
+        return [dict(record) for record in result]
 
-    # Get total number of nodes
     total_nodes = session.execute_read(get_total_nodes)
     print(f"Total nodes to process: {total_nodes}")
 
-    # Process nodes in batches
     for skip in range(0, total_nodes, batch_size):
-        # Get batch of nodes
         nodes = session.execute_read(get_batch_nodes, skip, batch_size)
+        cleaned_nodes = [clean_mathematical_content(node) for node in nodes]
         
-        # Clean content for each node
-        for node in nodes:
-            if node["content"]:  # Check if content exists
-                node["cleaned_content"] = clean_content(node["content"])
-            else:
-                node["cleaned_content"] = ""  # Handle null content
-        
-        # Update nodes with cleaned content
-        session.execute_write(update_nodes_batch, nodes)
+        session.execute_write(update_nodes_batch, cleaned_nodes)
         
         processed = min(skip + batch_size, total_nodes)
         print(f"Processed {processed} out of {total_nodes} nodes")
 
 def main():
     with gds.session() as session:
-        # create_constraints(session)
-        # load_nodes(session, 'nodes.csv') 
+        #create_constraints(session)
+        #load_nodes(session, 'nodes.csv') 
         append_embeddings(session, 'embeddings.csv')
-        # load_relationships(session, 'relationships.csv') 
-        # update_node_content(session)
+        #load_relationships(session, 'relationships.csv') 
+        update_node_content(session)
 
 if __name__ == "__main__":
     try:

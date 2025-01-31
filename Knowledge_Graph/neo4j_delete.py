@@ -14,7 +14,7 @@ def delete_all_nodes(uri, user, password):
         password (str): The password for authentication.
     """
     driver = GraphDatabase.driver(uri, auth=(user, password))
-
+    driver.verify_connectivity()  # Check if this raises any error
     with driver.session() as session:
         session.run("MATCH (n) DETACH DELETE n")
         print("All nodes and relationships have been deleted.")

@@ -1,6 +1,7 @@
 import openai
 import csv
 import os
+import json
 from dotenv import load_dotenv
 from tiktoken import get_encoding
 from neo4j import GraphDatabase
@@ -38,6 +39,21 @@ def split_text(text, max_tokens):
         chunks.append(chunk)
     return chunks
 
+def structure_mathematical_text(title, theorem, proof, math_expressions):
+    """Structure the text to prioritize mathematical components."""
+    structured_text = f"Title: {title}\n"
+    
+    if theorem:
+        structured_text += f"Theorem: {theorem}\n"
+    
+    if proof:
+        structured_text += f"Proof: {proof}\n"
+    
+    if math_expressions:
+        structured_text += f"Mathematical Expressions: {' '.join(math_expressions)}"
+        
+    return structured_text.strip()
+
 def generate_embeddings(input_csv, output_csv):
     with open(input_csv, mode='r', encoding='utf-8') as infile, \
          open(output_csv, mode='w', newline='', encoding='utf-8') as outfile:
@@ -46,29 +62,39 @@ def generate_embeddings(input_csv, output_csv):
         writer = csv.writer(outfile)
         writer.writerow(['id', 'embedding'])
         
-        # Skip the header row
-        next(reader, None)
-        
         count = 1
         for row in reader:
-            node_id, type, title, name, content = row
-            combined_text = f"{title} {content}"
+            node_id = row['id']
+            title = row['title']
+            theorem = row['theorem'] if 'theorem' in row else ''
+            proof = row['proof'] if 'proof' in row else ''
             
-            # Check token length
-            token_count = len(encoding.encode(combined_text))
+            try:
+                math_expressions = json.loads(row['math_expressions']) if 'math_expressions' in row and row['math_expressions'] else []
+            except (json.JSONDecodeError, TypeError):
+                math_expressions = []
+            
+            structured_text = structure_mathematical_text(
+                title, theorem, proof, math_expressions
+            )
+            
+            if not structured_text:
+                print(f"{count}. Skipping empty Node {node_id}")
+                continue
+            
+            token_count = len(encoding.encode(structured_text))
             if token_count > MAX_TOKENS:
-                print(f"{count}. Text too long for Node {node_id} : {name}, splitting into chunks.")
-                chunks = split_text(combined_text, MAX_TOKENS // 2)  # Split into smaller chunks
+                print(f"{count}. Text too long for Node {node_id}, splitting into chunks.")
+                chunks = split_text(structured_text, MAX_TOKENS // 2)
                 embeddings = []
                 for chunk in chunks:
                     embedding = get_embedding(chunk)
                     embeddings.append(embedding)
-                # Optionally, aggregate embeddings (e.g., average)
                 aggregated_embedding = [sum(values)/len(values) for values in zip(*embeddings)]
                 writer.writerow([node_id, aggregated_embedding])
             else:
-                print(f"{count}. Generating embedding for Node {node_id} : {name}")  # debugging statement
-                embedding = get_embedding(combined_text)
+                print(f"{count}. Generating embedding for Node {node_id}")
+                embedding = get_embedding(structured_text)
                 writer.writerow([node_id, embedding])
             
             count += 1
@@ -87,7 +113,11 @@ def generate_neo4j_embeddings(output_csv):
     def get_batch_nodes(tx, skip, limit):
         result = tx.run("""
             MATCH (n:Node)
-            RETURN n.id as id, n.title as title, n.content as content
+            RETURN n.id as id, 
+                   n.title as title, 
+                   n.theorem as theorem,
+                   n.proof as proof,
+                   n.math_expressions as math_expressions
             SKIP $skip
             LIMIT $limit
         """, skip=skip, limit=limit)
@@ -111,29 +141,39 @@ def generate_neo4j_embeddings(output_csv):
                 
                 for node in nodes:
                     node_id = node["id"]
-                    title = node["title"] or ""  # Handle None values
-                    content = node["content"] or ""  # Handle None values
+                    title = node["title"] or ""
+                    theorem = node["theorem"] or ""
+                    proof = node["proof"] or ""
                     
-                    combined_text = f"{title} {content}".strip()
-                    if not combined_text:  # Skip empty nodes
+                    # Parse math_expressions from string if it exists
+                    try:
+                        math_expressions = json.loads(node["math_expressions"]) if node["math_expressions"] else []
+                    except json.JSONDecodeError:
+                        math_expressions = []
+                    
+                    # Structure the text with mathematical components
+                    structured_text = structure_mathematical_text(
+                        title, theorem, proof, math_expressions
+                    )
+                    
+                    if not structured_text:
                         print(f"{count}. Skipping empty Node {node_id}")
                         continue
 
                     # Check token length and generate embedding
-                    token_count = len(encoding.encode(combined_text))
+                    token_count = len(encoding.encode(structured_text))
                     if token_count > MAX_TOKENS:
                         print(f"{count}. Text too long for Node {node_id}, splitting into chunks.")
-                        chunks = split_text(combined_text, MAX_TOKENS // 2)
+                        chunks = split_text(structured_text, MAX_TOKENS // 2)
                         embeddings = []
                         for chunk in chunks:
                             embedding = get_embedding(chunk)
                             embeddings.append(embedding)
-                        # Average the embeddings from chunks
                         aggregated_embedding = [sum(values)/len(values) for values in zip(*embeddings)]
                         writer.writerow([node_id, aggregated_embedding])
                     else:
                         print(f"{count}. Generating embedding for Node {node_id}")
-                        embedding = get_embedding(combined_text)
+                        embedding = get_embedding(structured_text)
                         writer.writerow([node_id, embedding])
                     
                     count += 1
@@ -152,7 +192,7 @@ def embedding_size():
 if __name__ == "__main__":
     # input_csv = '../nodes.csv'  # path to input CSV file
     # output_csv = 'embeddings.csv'  # path to output CSV file
-    # print(f"Embedding size: {embedding_size()}")  # debugging statement
+    # # print(f"Embedding size: {embedding_size()}")  # debugging statement
     # generate_embeddings(input_csv, output_csv)
     output_csv = 'embeddings.csv'
     try:
