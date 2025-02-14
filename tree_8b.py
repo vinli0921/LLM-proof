@@ -13,6 +13,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.schema import StrOutputParser
 from openai import OpenAI
+from together import Together
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
@@ -20,6 +21,24 @@ from RAG.Neo4jVectorRetriever import Neo4jVectorRetriever
 from prover.lean.verifier import Lean4ServerScheduler
 
 load_dotenv()
+
+class TogetherLLM:
+    def __init__(self, model: str, temperature: float = 0.7, n: int = 1):
+        self.client = Together()
+        self.model = model
+        self.temperature = temperature
+        self.n = n
+
+    def create(self, messages: List[Dict]) -> List[str]:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=self.temperature,
+            n=self.n,
+            max_tokens=3072
+        )
+        # Return a list of response texts, one per candidate.
+        return [choice.message.content for choice in response.choices]
 
 @dataclass
 class TestCase:
@@ -49,9 +68,10 @@ class VotingProofGenerator:
                 model_type: str = "gpt-4",
                 temperature: float = 0.7,
                 n_candidates: int = 5,
-                ranker_model: str = "gpt-4",  # Using GPT-4 for more reliable ranking
+                ranker_model: str = "gpt-4",  
                 ranker_temperature: float = 0.0):
         self.client = OpenAI()
+        self.together = Together()
         self.model_type = model_type
         self.temperature = temperature
         self.n_candidates = n_candidates
@@ -67,11 +87,7 @@ class VotingProofGenerator:
             ranker_model: Model to use for ranking proofs
             ranker_temperature: Temperature for the ranking model
         """
-        self.generation_llm = ChatOpenAI(
-            model_name=model_type,
-            temperature=temperature,
-            n=n_candidates,
-        )
+        self.generation_llm = TogetherLLM(model=model_type, temperature=temperature, n=n_candidates)
         
         self.ranker_llm = ChatOpenAI(
             model_name=ranker_model,
@@ -81,18 +97,17 @@ class VotingProofGenerator:
         self.n_candidates = n_candidates
 
     def generate_proof_candidates(self, context: str, problem: str) -> List[ProofCandidate]:
-        """Generate multiple candidate proofs using direct OpenAI API call."""
+        """Generate multiple candidate proofs using direct Together API call."""
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_type,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a mathematics expert focused on generating clear informal proofs."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"""Generate a clear and detailed informal proof in natural language.
+            
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a mathematics expert focused on generating clear informal proofs."
+                },
+                {
+                    "role": "user",
+                    "content": f"""Generate a clear and detailed informal proof in natural language.
 Pay special attention to:
 - Similar theorem statements
 - Related proof techniques
@@ -109,16 +124,10 @@ Provide your proof in this format:
 
 # Informal Proof:
 [Your natural language proof here]"""
-                    }
-                ],
-                temperature=self.temperature,
-                n=self.n_candidates,
-            )
-            
-            return [
-                ProofCandidate(proof_text=choice.message.content.strip())
-                for choice in response.choices
+                }
             ]
+            responses = self.generation_llm.create(messages)
+            return [ProofCandidate(proof_text=resp.strip()) for resp in responses]
         except Exception as e:
             print(f"Error generating proofs: {e}")
             return [ProofCandidate(proof_text="Error generating proof.")]
@@ -259,16 +268,14 @@ Generate a refined proof that improves upon the original.""")
                      problem: str,
                      feedback: str = "") -> List[ProofCandidate]:
         """Generate refined versions of a proof."""
-        chain = self.refinement_prompt | self.generation_llm | StrOutputParser()
-        
-        responses = chain.batch([{
-            "proof": proof,
-            "problem": problem,
-            "context": context,
-            "feedback": feedback
-        }] * self.n_candidates)
-        
-        return [ProofCandidate(proof_text=resp.strip()) for resp in responses]
+        prompt = self.refinement_prompt.format(proof=proof, context=context, problem=problem, feedback=feedback)
+        messages = [{"role": "user", "content": prompt}]
+        try:
+            responses = self.generation_llm.create(messages)
+            return [ProofCandidate(proof_text=resp.strip()) for resp in responses]
+        except Exception as e:
+            print(f"Error in refinement: {e}")
+            return [ProofCandidate(proof_text="Error in refinement.")]
 
     def tree_search(self, 
                    context: str, 
@@ -581,7 +588,7 @@ class TwoAgentProver:
                         passed=passes,
                         candidate_count=search_stats["nodes_explored"],
                         best_score=best_candidate.score,
-                        proof_scores=[p.score for p in search_stats.get("successful_proofs", [])]
+                        proof_scores=[p["proof"].score for p in search_stats.get("successful_proofs", [])]
                     )
                     
                     if passes:
@@ -687,7 +694,7 @@ if __name__ == "__main__":
     
     try:
         # Load test data
-        test_cases = load_test_data('datasets/mustard_short.jsonl')
+        test_cases = load_test_data('datasets/minif2f.jsonl')
         print(f"Total test cases: {len(test_cases)}")
         
         # Create two-agent prover
@@ -698,21 +705,21 @@ if __name__ == "__main__":
             neo4j_password=os.environ.get('NEO4J_PASSWORD'),
             auto_formalizer=auto_formalizer,
             # Voting system parameters
-            model_type="gpt-4o",              
+            model_type="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo-128K",              
             ranker_model="gpt-4o",   
             n_candidates=5,                   # Number of proofs to generate
             beam_width=3,                     # Keep top-3 candidates in tree search
             search_depth=2,                   # Depth of tree search
             max_depth=2,                      # RAG depth
             max_attempts=1,                   # Formalization attempts
-            log_file='ms_4o_tree.csv'
+            log_file='ms_8b_tree_graph.csv'
         )
         
         # Run evaluation
         results = run_evaluation(
             prover,
             test_cases,
-            'ms_4o_tree.json'
+            'ms_8b_tree_graph.json'
         )
         
     finally:

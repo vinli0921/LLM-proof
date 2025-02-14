@@ -97,7 +97,7 @@ Provide your proof in the following format:
                 {"role": "user", "content": formatted_prompt}
             ],
             temperature=self.temperature,
-            max_tokens=4096
+            max_tokens=3072
         )
         
         return response.choices[0].message.content.strip()
@@ -406,7 +406,7 @@ if __name__ == "__main__":
     
     try:
         # Load test data
-        test_cases = load_test_data('datasets/proofnet.jsonl')
+        test_cases = load_test_data('datasets/minif2f.jsonl')
         print(f"Total test cases: {len(test_cases)}")
         
         # Create two-agent prover
@@ -417,16 +417,16 @@ if __name__ == "__main__":
             neo4j_password=os.environ.get('NEO4J_PASSWORD'),
             proof_generator=proof_generator,
             auto_formalizer=auto_formalizer,
-            max_depth=0,
-            max_attempts=3,
-            log_file='p_8b_RAG_results.csv'
+            max_depth=6,
+            max_attempts=1,
+            log_file='m_Graph6_8b_results.csv'
         )
         
         # Run evaluation
         results = run_evaluation(
             prover,
             test_cases,
-            'p_8b_RAG_results.json'
+            'm_Graph6_8b_results.json'
         )
         
     finally:

@@ -429,7 +429,7 @@ if __name__ == "__main__":
     
     try:
         # Load test data
-        test_cases = load_test_data('datasets/proofnet.jsonl')
+        test_cases = load_test_data('datasets/mustard_short.jsonl')
         print(f"Total test cases: {len(test_cases)}")
         
         # Create two-agent prover
@@ -440,16 +440,16 @@ if __name__ == "__main__":
             neo4j_password=os.environ.get('NEO4J_PASSWORD'),
             proof_generator=proof_generator,
             auto_formalizer=auto_formalizer,
-            max_depth=0,
-            max_attempts=3,
-            log_file='p_o1_RAG_results.csv'
+            max_depth=6,
+            max_attempts=1,
+            log_file='tim_mustard_Graph6_o1_results.csv'
         )
         
         # Run evaluation
         results = run_evaluation(
             prover,
             test_cases,
-            'p_o1_RAG_results.json'
+            'tim_mustard_Graph6_o1_results.csv'
         )
         
     finally:

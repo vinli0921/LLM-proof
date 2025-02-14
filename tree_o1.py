@@ -87,12 +87,10 @@ class VotingProofGenerator:
                 model=self.model_type,
                 messages=[
                     {
-                        "role": "system",
-                        "content": "You are a mathematics expert focused on generating clear informal proofs."
-                    },
-                    {
                         "role": "user",
-                        "content": f"""Generate a clear and detailed informal proof in natural language.
+                        "content": f"""You are a mathematics expert focused on generating clear informal proofs.
+
+Generate a clear and detailed informal proof in natural language.
 Pay special attention to:
 - Similar theorem statements
 - Related proof techniques
@@ -581,7 +579,7 @@ class TwoAgentProver:
                         passed=passes,
                         candidate_count=search_stats["nodes_explored"],
                         best_score=best_candidate.score,
-                        proof_scores=[p.score for p in search_stats.get("successful_proofs", [])]
+                        proof_scores=[p["proof"].score for p in search_stats.get("successful_proofs", [])]
                     )
                     
                     if passes:
@@ -698,21 +696,21 @@ if __name__ == "__main__":
             neo4j_password=os.environ.get('NEO4J_PASSWORD'),
             auto_formalizer=auto_formalizer,
             # Voting system parameters
-            model_type="gpt-4o",              
+            model_type="o1-mini",              
             ranker_model="gpt-4o",   
             n_candidates=5,                   # Number of proofs to generate
             beam_width=3,                     # Keep top-3 candidates in tree search
             search_depth=2,                   # Depth of tree search
             max_depth=2,                      # RAG depth
             max_attempts=1,                   # Formalization attempts
-            log_file='ms_4o_tree.csv'
+            log_file='ms_o1_tree.csv'
         )
         
         # Run evaluation
         results = run_evaluation(
             prover,
             test_cases,
-            'ms_4o_tree.json'
+            'ms_o1_tree.json'
         )
         
     finally:
